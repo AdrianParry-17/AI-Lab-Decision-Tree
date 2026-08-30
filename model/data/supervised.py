@@ -3,7 +3,13 @@ from dataclasses import dataclass
 from typing import Generic, TypeVar, Tuple, Any, Callable
 from .data import IData
 
-__all__ = ['ISupervisedData']
+__all__ = [
+    'ISupervisedData', 'ISupervisedDataExtractor', 'ISupervisedDataBuilder',
+    'ISupervisedDataParser', 'ExtractBuildSupervisedDataParser',
+    'FunctionSupervisedDataExtractor',
+    'FunctionSupervisedDataBuilder',
+    'FunctionSupervisedDataParser'
+]
 
 # --- Abstracting stuff here ---
 
@@ -39,7 +45,7 @@ class ISupervisedDataParser(ABC, Generic[DataT, SupervisedDataT]):
 
 # --- The specific stuff here ---
 
-class ExtractBuildSuperviseDataParser(Generic[InputT, OutputT, DataT, SupervisedDataT], ISupervisedDataParser[DataT, SupervisedDataT]):
+class ExtractBuildSupervisedDataParser(Generic[InputT, OutputT, DataT, SupervisedDataT], ISupervisedDataParser[DataT, SupervisedDataT]):
     def __init__(self, extractor: ISupervisedDataExtractor[InputT, OutputT, DataT],
                  builder: ISupervisedDataBuilder[InputT, OutputT, SupervisedDataT]) -> None:
         if extractor is None:
@@ -53,7 +59,7 @@ class ExtractBuildSuperviseDataParser(Generic[InputT, OutputT, DataT, Supervised
     def Parse(self, data: DataT) -> SupervisedDataT:
         return self.Builder.Build(self.Extractor.Extract(data))
 
-class FunctionSuperviseDataExtractor(Generic[InputT, OutputT, DataT], ISupervisedDataExtractor[InputT, OutputT, DataT]):
+class FunctionSupervisedDataExtractor(Generic[InputT, OutputT, DataT], ISupervisedDataExtractor[InputT, OutputT, DataT]):
     def __init__(self, function: Callable[[DataT], Tuple[InputT, OutputT]]):
         if function is None:
             raise ValueError("[function] cannot be None!")
@@ -62,7 +68,7 @@ class FunctionSuperviseDataExtractor(Generic[InputT, OutputT, DataT], ISupervise
     def Extract(self, data: DataT) -> Tuple[InputT, OutputT]:
         return self.Function(data)
 
-class FunctionSuperviseDataBuilder(Generic[InputT, OutputT, SupervisedDataT], ISupervisedDataBuilder[InputT, OutputT, SupervisedDataT]):
+class FunctionSupervisedDataBuilder(Generic[InputT, OutputT, SupervisedDataT], ISupervisedDataBuilder[InputT, OutputT, SupervisedDataT]):
     def __init__(self, function: Callable[[Tuple[InputT, OutputT]], SupervisedDataT]):
         if function is None:
             raise ValueError("[function] cannot be None!")
@@ -71,7 +77,7 @@ class FunctionSuperviseDataBuilder(Generic[InputT, OutputT, SupervisedDataT], IS
     def Build(self, data: Tuple[InputT, OutputT]) -> SupervisedDataT:
         return self.Function(data)
 
-class FunctionSuperviseDataParser(Generic[DataT, SupervisedDataT], ISupervisedDataParser[DataT, SupervisedDataT]):
+class FunctionSupervisedDataParser(Generic[DataT, SupervisedDataT], ISupervisedDataParser[DataT, SupervisedDataT]):
     def __init__(self, function: Callable[[DataT], SupervisedDataT]):
         if function is None:
             raise ValueError("[function] cannot be None!")
@@ -83,7 +89,7 @@ class FunctionSuperviseDataParser(Generic[DataT, SupervisedDataT], ISupervisedDa
 
 
 @dataclass
-class StructSupervisedData(Generic[InputT, OutputT], ISupervisedData[InputT, OutputT]):
+class ValueSupervisedData(Generic[InputT, OutputT], ISupervisedData[InputT, OutputT]):
     Input: InputT
     Output: OutputT
 

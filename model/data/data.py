@@ -2,17 +2,23 @@ from abc import abstractmethod, ABC
 from dataclasses import dataclass
 from typing import TypeVar, Generic, Tuple, TypeVarTuple
 
-__all__ = ["IData", "StructData", "TupleData"]
+__all__ = ["IData", "ValueData", "TupleData"]
+
+# --- Generic stuff ---
 
 DataT = TypeVar('DataT')
 
 class IData(ABC, Generic[DataT]):
+    """Basically, base class of all data."""
     @abstractmethod
     def GetData(self) -> DataT:
         pass
 
+# --- Specific stuff ---
+
 @dataclass
-class StructData(Generic[DataT], IData[DataT]):
+class ValueData(Generic[DataT], IData[DataT]):
+    """A data that only contain the value explicitly as variable."""
     Data: DataT
 
     def GetData(self) -> DataT:
@@ -20,7 +26,7 @@ class StructData(Generic[DataT], IData[DataT]):
 
 DataTTuple = TypeVarTuple('DataTTuple')
 
-class TupleData(Generic[*DataTTuple], StructData[Tuple[*DataTTuple]]):
+class TupleData(Generic[*DataTTuple], ValueData[Tuple[*DataTTuple]]):
     def GetSize(self) -> int:
         return len(self.Data)
 
