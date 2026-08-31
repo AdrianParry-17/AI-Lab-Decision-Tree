@@ -1,4 +1,8 @@
-# Decision Tree Result
+# Depth-Limited Decision Tree (Gini)
+
+## Method
+
+Apply pre-pruning with `max_depth=4` while retaining the baseline Gini criterion. Limiting growth should reduce variance and prevent the tree from memorizing small training partitions.
 
 ## Data and preprocessing
 
@@ -13,19 +17,24 @@
 - Target: `Pass_Fail`
 - Excluded inputs: `Student_ID` (identifier), `Final_Exam_Score`
 - Features (7): `Gender`, `Study_Hours_per_Week`, `Attendance_Rate`, `Past_Exam_Scores`, `Parental_Education_Level`, `Internet_Access_at_Home`, `Extracurricular_Activities`
-- Numeric CSV values were converted to `int`/`float`; categorical values remain strings.
+- Numeric fields were converted to `int`/`float`; categorical fields remain strings.
 
-## Model summary
+## Model and tree shape
 
 - Trainer: custom `CreateAttributeClassificationTrainingStrategy`
-- Split objective: weighted Gini impurity
-- Pre-pruning: maximum depth `4`
-- Early stopping: make a leaf when all local labels are identical
+- Splitting criterion: weighted Gini impurity
+- Configured maximum depth: 4
+- Natural stopping: make a leaf when all local labels are identical or no split is available
 - Nodes: 35
 - Leaves: 19
-- Learned maximum depth: 4
-- Training accuracy: 454/531 (85.50%)
-- Testing accuracy: 136/177 (76.84%)
+- Observed maximum depth: 4
+
+## Accuracy and error rate
+
+| Dataset | Correct | Incorrect | Accuracy | Error rate |
+| --- | ---: | ---: | ---: | ---: |
+| Training | 454/531 | 77/531 | 85.50% | 14.50% |
+| Testing | 136/177 | 41/177 | 76.84% | 23.16% |
 
 ## Confusion matrix (training data)
 

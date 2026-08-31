@@ -1,11 +1,12 @@
-"""Train and evaluate the repository's decision tree on the student CSV."""
+"""Shared data, training, evaluation, and report utilities."""
 
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from random import Random
-from typing import Sequence
+from typing import Callable, Sequence
 
 from data.loader import (
     TARGET_COLUMN,
@@ -33,19 +34,63 @@ from model.models.decision_tree.tree import (
 )
 
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_PATH = BASE_DIR / "data" / "student_data.csv"
-RESULT_PATH = BASE_DIR / "RESULT.md"
+ROOT_DIR = Path(__file__).resolve().parents[1]
+DATA_PATH = ROOT_DIR / "data" / "student_data.csv"
+DOCS_DIR = ROOT_DIR / "docs"
 
 TRAINING_FRACTION = 3 / 4
 RANDOM_SEED = 42
-MAX_DEPTH = 4
+
+ImpurityFunction = Callable[[Sequence[str]], float]
+
+
+@dataclass(frozen=True)
+class ExperimentConfig:
+    """The one controlled model configuration used by an experiment."""
+
+    title: str
+    method: str
+    criterion_name: str
+    impurity: ImpurityFunction
+    max_depth: int | None
+
+
+@dataclass(frozen=True)
+class EvaluationMetrics:
+    """Classification counts for one dataset partition."""
+
+    total: int
+    correct: int
+    confusion: Counter[tuple[str, str]]
+
+    @property
+    def incorrect(self) -> int:
+        return self.total - self.correct
+
+    @property
+    def accuracy(self) -> float:
+        return self.correct / self.total
+
+    @property
+    def error_rate(self) -> float:
+        return self.incorrect / self.total
+
+
+@dataclass(frozen=True)
+class ExperimentOutcome:
+    """The metrics and tree shape produced by an experiment."""
+
+    training: EvaluationMetrics
+    testing: EvaluationMetrics
+    nodes: int
+    leaves: int
+    maximum_depth: int
 
 
 def _example_key(
     example: TrainingExample,
 ) -> tuple[tuple[tuple[str, FeatureValue], ...], str]:
-    """Identify repeated labeled records without using them as model features."""
+    """Identify repeated labeled records without using them as features."""
     return tuple(example.GetInput()), example.GetOutput()
 
 
@@ -79,7 +124,7 @@ def split_data(
     training_fraction: float = TRAINING_FRACTION,
     random_seed: int = RANDOM_SEED,
 ) -> tuple[list[TrainingExample], list[TrainingExample]]:
-    """Make a reproducible stratified split without leaking duplicate rows."""
+    """Make a reproducible stratified split without duplicate-row leakage."""
     if not 0.0 < training_fraction < 1.0:
         raise ValueError("[training_fraction] must be between 0 and 1")
 
@@ -114,35 +159,47 @@ def split_data(
         groups = groups_by_label[label]
         random.shuffle(groups)
         split_index = allocations[label]
-        training.extend(example for group in groups[:split_index] for example in group)
-        testing.extend(example for group in groups[split_index:] for example in group)
+        training.extend(
+            example
+            for group in groups[:split_index]
+            for example in group
+        )
+        testing.extend(
+            example
+            for group in groups[split_index:]
+            for example in group
+        )
 
     random.shuffle(training)
     random.shuffle(testing)
     return training, testing
 
 
-def train(
+def train_tree(
     examples: Sequence[TrainingExample],
-    max_depth: int = MAX_DEPTH,
+    impurity: ImpurityFunction,
+    max_depth: int | None,
 ) -> DecisionTree[ModelInput, str]:
-    """Train through the custom library's standard classification strategy."""
+    """Train a classification tree with the requested controlled settings."""
     tree: DecisionTree[ModelInput, str] = DecisionTree()
     strategy = CreateAttributeClassificationTrainingStrategy(
         examples,
         input_getter=lambda example: example.GetInput(),
         output_getter=lambda example: example.GetOutput(),
+        impurity=impurity,
         max_depth=max_depth,
     )
     pure_node_criterion = FunctionStoppingCriterion(
         lambda state: len({example.GetOutput() for example in state.Data}) == 1
     )
+
     if strategy.StoppingCriterion is None:
         strategy.StoppingCriterion = pure_node_criterion
     else:
         strategy.StoppingCriterion = AnyStoppingCriterion(
             (strategy.StoppingCriterion, pure_node_criterion)
         )
+
     strategy.Train(tree)
     return tree
 
@@ -164,8 +221,10 @@ def _branch_condition(split: object, branch: object) -> str:
     return f"branch `{branch!r}`"
 
 
-def _ordered_children(items: Sequence[tuple[object, INode]]) -> list[tuple[object, INode]]:
-    """Put a threshold's <= branch first and keep other exports deterministic."""
+def _ordered_children(
+    items: Sequence[tuple[object, INode]],
+) -> list[tuple[object, INode]]:
+    """Put a threshold's <= branch first and keep output deterministic."""
     return sorted(items, key=lambda item: (item[0] is not True, repr(item[0])))
 
 
@@ -206,31 +265,32 @@ def tree_statistics(node: INode, depth: int = 0) -> tuple[int, int, int]:
     if not isinstance(node, DistributorBranchNode):
         return 1, 0, depth
 
-    child_stats = [
+    child_statistics = [
         tree_statistics(child, depth + 1)
         for _, child in node.GetDistributor().GetMapping().GetItems()
     ]
     return (
-        1 + sum(nodes for nodes, _, _ in child_stats),
-        sum(leaves for _, leaves, _ in child_stats),
-        max(max_depth for _, _, max_depth in child_stats),
+        1 + sum(nodes for nodes, _, _ in child_statistics),
+        sum(leaves for _, leaves, _ in child_statistics),
+        max(maximum_depth for _, _, maximum_depth in child_statistics),
     )
 
 
-def _evaluate(
+def evaluate(
     tree: DecisionTree[ModelInput, str],
     examples: Sequence[TrainingExample],
-) -> tuple[int, Counter[tuple[str, str]]]:
+) -> EvaluationMetrics:
+    """Evaluate a trained tree without changing it."""
     predictions = [tree.Execute(example.GetInput()) for example in examples]
     correct = sum(
         prediction == example.GetOutput()
         for example, prediction in zip(examples, predictions)
     )
-    counts = Counter(
+    confusion = Counter(
         (example.GetOutput(), prediction)
         for example, prediction in zip(examples, predictions)
     )
-    return correct, counts
+    return EvaluationMetrics(len(examples), correct, confusion)
 
 
 def _render_confusion_matrix(
@@ -257,33 +317,52 @@ def _format_class_counts(examples: Sequence[TrainingExample]) -> str:
 
 
 def build_result(
+    config: ExperimentConfig,
     tree: DecisionTree[ModelInput, str],
     training_examples: Sequence[TrainingExample],
     testing_examples: Sequence[TrainingExample],
     feature_names: Sequence[str],
-) -> str:
+) -> tuple[str, ExperimentOutcome]:
+    """Build one complete Markdown experiment result and its summary."""
     root = tree.GetRoot()
     if root is None:
         raise RuntimeError("Training completed without producing a root node")
 
     all_examples = [*training_examples, *testing_examples]
     labels = sorted({example.GetOutput() for example in all_examples})
-    training_correct, training_counts = _evaluate(tree, training_examples)
-    testing_correct, testing_counts = _evaluate(tree, testing_examples)
-    training_accuracy = training_correct / len(training_examples)
-    testing_accuracy = testing_correct / len(testing_examples)
-    nodes, leaves, max_depth = tree_statistics(root)
-    training_confusion = _render_confusion_matrix(labels, training_counts)
-    testing_confusion = _render_confusion_matrix(labels, testing_counts)
+    training_metrics = evaluate(tree, training_examples)
+    testing_metrics = evaluate(tree, testing_examples)
+    nodes, leaves, maximum_depth = tree_statistics(root)
+    outcome = ExperimentOutcome(
+        training_metrics,
+        testing_metrics,
+        nodes,
+        leaves,
+        maximum_depth,
+    )
+
+    training_confusion = _render_confusion_matrix(
+        labels,
+        training_metrics.confusion,
+    )
+    testing_confusion = _render_confusion_matrix(
+        labels,
+        testing_metrics.confusion,
+    )
     distinct_training = len({_example_key(example) for example in training_examples})
     distinct_testing = len({_example_key(example) for example in testing_examples})
     distinct_total = len({_example_key(example) for example in all_examples})
-
-    tree_text = "\n".join(render_tree(root))
+    depth_limit = "None (fully grown)" if config.max_depth is None else str(config.max_depth)
     features = ", ".join(f"`{name}`" for name in feature_names)
-    return "\n".join(
+    tree_text = "\n".join(render_tree(root))
+
+    markdown = "\n".join(
         [
-            "# Decision Tree Result",
+            f"# {config.title}",
+            "",
+            "## Method",
+            "",
+            config.method,
             "",
             "## Data and preprocessing",
             "",
@@ -298,19 +377,24 @@ def build_result(
             f"- Target: `{TARGET_COLUMN}`",
             "- Excluded inputs: `Student_ID` (identifier), `Final_Exam_Score`",
             f"- Features ({len(feature_names)}): {features}",
-            "- Numeric CSV values were converted to `int`/`float`; categorical values remain strings.",
+            "- Numeric fields were converted to `int`/`float`; categorical fields remain strings.",
             "",
-            "## Model summary",
+            "## Model and tree shape",
             "",
             "- Trainer: custom `CreateAttributeClassificationTrainingStrategy`",
-            "- Split objective: weighted Gini impurity",
-            f"- Pre-pruning: maximum depth `{MAX_DEPTH}`",
-            "- Early stopping: make a leaf when all local labels are identical",
+            f"- Splitting criterion: {config.criterion_name}",
+            f"- Configured maximum depth: {depth_limit}",
+            "- Natural stopping: make a leaf when all local labels are identical or no split is available",
             f"- Nodes: {nodes}",
             f"- Leaves: {leaves}",
-            f"- Learned maximum depth: {max_depth}",
-            f"- Training accuracy: {training_correct}/{len(training_examples)} ({training_accuracy:.2%})",
-            f"- Testing accuracy: {testing_correct}/{len(testing_examples)} ({testing_accuracy:.2%})",
+            f"- Observed maximum depth: {maximum_depth}",
+            "",
+            "## Accuracy and error rate",
+            "",
+            "| Dataset | Correct | Incorrect | Accuracy | Error rate |",
+            "| --- | ---: | ---: | ---: | ---: |",
+            f"| Training | {training_metrics.correct}/{training_metrics.total} | {training_metrics.incorrect}/{training_metrics.total} | {training_metrics.accuracy:.2%} | {training_metrics.error_rate:.2%} |",
+            f"| Testing | {testing_metrics.correct}/{testing_metrics.total} | {testing_metrics.incorrect}/{testing_metrics.total} | {testing_metrics.accuracy:.2%} | {testing_metrics.error_rate:.2%} |",
             "",
             "## Confusion matrix (training data)",
             "",
@@ -328,22 +412,28 @@ def build_result(
             "",
         ]
     )
+    return markdown, outcome
 
 
-def main() -> int:
+def run_experiment(
+    config: ExperimentConfig,
+    result_path: Path,
+) -> ExperimentOutcome:
+    """Load, split, train, evaluate, and write one experiment report."""
     examples, feature_names = load_data(DATA_PATH)
     training_examples, testing_examples = split_data(examples)
-    tree = train(training_examples)
-    RESULT_PATH.write_text(
-        build_result(tree, training_examples, testing_examples, feature_names),
-        encoding="utf-8",
+    tree = train_tree(
+        training_examples,
+        impurity=config.impurity,
+        max_depth=config.max_depth,
     )
-    print(
-        f"Trained on {len(training_examples)} rows, "
-        f"tested on {len(testing_examples)} rows, and wrote {RESULT_PATH}"
+    markdown, outcome = build_result(
+        config,
+        tree,
+        training_examples,
+        testing_examples,
+        feature_names,
     )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(markdown, encoding="utf-8")
+    return outcome
