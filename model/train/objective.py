@@ -27,6 +27,8 @@ class FunctionObjective(Generic[OutputT, EvaluateT], IObjective[OutputT, Evaluat
     def Evaluate(self, output: OutputT) -> EvaluateT:
         return self.Function(output)
 
+# Bridge to IData
+
 ObjectiveDataT = TypeVar('ObjectiveDataT', bound=IData[Any])
 
 class IDataObjective(Generic[OutputT, EvaluateT, ObjectiveDataT], IObjective[OutputT, EvaluateT]):
