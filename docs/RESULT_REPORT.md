@@ -7,7 +7,7 @@ This experiment evaluates two proposed improvements against a fully grown decisi
 1. Pre-pruning the tree with a maximum depth of 4.
 2. Changing the split criterion from Gini impurity to Entropy while keeping the depth limit fixed at 4.
 
-The individual generated results, including confusion matrices and complete tree shapes, are available in [RESULT_PURE.md](RESULT_PURE.md), [RESULT_DEPTH.md](RESULT_DEPTH.md), and [RESULT_DEPTH_CRI.md](RESULT_DEPTH_CRI.md).
+The individual generated results, including confusion matrices and complete tree shapes, are available in [RESULT_PURE.md](RESULT_PURE.md), [RESULT_DEPTH.md](RESULT_DEPTH.md), and [RESULT_DEPTH_CRI.md](RESULT_DEPTH_CRI.md). The recommended tree is visualized in [tree_visualization.html](tree_visualization.html), and its independent interpretation is in [ANALYSIS_RESULTING_TREE.md](ANALYSIS_RESULTING_TREE.md).
 
 ## Experimental controls
 
